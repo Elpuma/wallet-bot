@@ -157,12 +157,15 @@ def build_wallet_embed(
 
     if holds:
         lines = []
+
         for hold in holds[:8]:
+            hold_id = hold.get("hold_id") or hold.get("id") or "N/A"
             ticket_channel_id = hold.get("ticket_id")
             collector_text = short_preview(hold.get("collector_text")) or "N/A"
             ticket_display = f"<#{ticket_channel_id}>" if ticket_channel_id else "N/A"
 
             line = (
+                f"Hold ID: `{hold_id}` | "
                 f"Ticket: {ticket_display} | "
                 f"{hold['currency']} {fmt_compact_amount(hold['amount'])} | "
                 f"Collector: {collector_text}"
