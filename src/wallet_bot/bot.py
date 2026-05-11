@@ -11,6 +11,7 @@ from wallet_bot.config import load_settings
 from wallet_bot.db.database import WalletDB
 from wallet_bot.logging_config import configure_logging
 from wallet_bot.commands.feedback import feedback_anonymous, feedback_public
+from wallet_bot.commands.resolved import resolved
 
 logger = logging.getLogger("wallet-bot")
 
@@ -38,6 +39,7 @@ def build_bot() -> commands.Bot:
     bot.tree.add_command(convert)
     bot.tree.add_command(feedback_anonymous)
     bot.tree.add_command(feedback_public)
+    bot.tree.add_command(resolved)
 
     @bot.event
     async def setup_hook():
