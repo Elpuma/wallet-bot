@@ -7,6 +7,7 @@ from typing import Optional
 
 import discord
 from discord import app_commands
+import re
 
 from wallet_bot.constants import MAX_AUDIT_PREVIEW_LENGTH
 from wallet_bot.db.database import WalletDB
@@ -61,6 +62,42 @@ AUTH_DESTINATION_CHOICES = [
     app_commands.Choice(name="Cuts Amount", value="cuts_amount"),
     app_commands.Choice(name="Total Generated", value="total_generated"),
 ]
+
+def extract_ticket_number_from_channel(channel: Optional[discord.abc.GuildChannel]) -> Optional[str]:
+    if not channel:
+        return None
+
+    channel_name = getattr(channel, "name", None)
+    if not channel_name:
+        return None
+
+    match = re.search(r"(?:ticket[-_\s]*)?(\d+)$", channel_name, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    if "ticket" in channel_name.lower():
+        return channel_name
+
+    return None
+
+
+def build_ticket_choice_from_channel(interaction: discord.Interaction) -> Optional[app_commands.Choice[str]]:
+    channel = interaction.channel
+    ticket_number = extract_ticket_number_from_channel(channel)
+
+    if not ticket_number:
+        return None
+
+    channel_id = getattr(channel, "id", None)
+    if not channel_id:
+        return None
+
+    channel_name = getattr(channel, "name", f"ticket-{ticket_number}")
+
+    return app_commands.Choice(
+        name=f"{channel_name} | Ticket #{ticket_number}",
+        value=str(channel_id),
+    )
 
 
 def short_preview(value: Optional[str]) -> str:
@@ -244,6 +281,30 @@ class WalletCommandGroup(app_commands.Group):
         value="New value",
         note="Optional note",
     )
+
+    @add.autocomplete("ticket_id")
+    async def add_ticket_id_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        choices: list[app_commands.Choice[str]] = []
+
+        current_ticket_choice = build_ticket_choice_from_channel(interaction)
+        if current_ticket_choice:
+            choices.append(current_ticket_choice)
+
+        if current.strip():
+            manual_value = current.strip()
+            choices.append(
+                app_commands.Choice(
+                    name=f"Use custom ticket_id: {manual_value}",
+                    value=manual_value,
+                )
+            )
+
+        return choices[:25]
+
     @app_commands.choices(field=WALLET_SET_CHOICES)
     async def set(
         self,
