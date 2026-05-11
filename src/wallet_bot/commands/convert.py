@@ -68,7 +68,7 @@ def build_converter_embed(
     embed.add_field(
         name="💵 PayPal",
         value=(
-            "Rate: `$1.04 / 1m GP`\n"
+            "Rate: `$0.27 + 4% / 1m GP`\n"
             f"Total: **{format_usd(paypal_total)}**"
         ),
         inline=True,
