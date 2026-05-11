@@ -5,6 +5,7 @@ import logging
 import discord
 from discord.ext import commands
 
+from wallet_bot.commands.convert import convert
 from wallet_bot.commands.wallet import WalletCommandGroup
 from wallet_bot.config import load_settings
 from wallet_bot.db.database import WalletDB
@@ -20,8 +21,6 @@ def build_bot() -> commands.Bot:
     intents = discord.Intents.default()
     intents.guilds = True
     intents.members = True
-    # We intentionally do not enable message_content.
-    # This bot uses slash commands only.
 
     bot = commands.Bot(command_prefix="!", intents=intents)
     db = WalletDB(settings.db_path)
@@ -33,7 +32,9 @@ def build_bot() -> commands.Bot:
         log_channel_id=settings.log_channel_id,
         bot_client=bot,
     )
+
     bot.tree.add_command(wallet_group)
+    bot.tree.add_command(convert)
 
     @bot.event
     async def setup_hook():
@@ -41,7 +42,6 @@ def build_bot() -> commands.Bot:
             if settings.guild_id:
                 guild = discord.Object(id=settings.guild_id)
 
-                # Copy global commands into the test guild first.
                 bot.tree.copy_global_to(guild=guild)
 
                 synced = await bot.tree.sync(guild=guild)
