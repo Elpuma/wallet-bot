@@ -45,7 +45,7 @@ def build_converter_embed(
     million_units = gp_amount / Decimal("1000000")
 
     crypto_total = million_units * Decimal("0.27")
-    paypal_total = million_units * Decimal("1.04")
+    paypal_total = million_units * Decimal("1.04") * Decimal("0.27")
 
     embed = discord.Embed(
         title="💱 GP to IRL Converter",
