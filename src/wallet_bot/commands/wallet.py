@@ -1,22 +1,21 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
 import discord
 from discord import app_commands
-import re
 
 from wallet_bot.constants import MAX_AUDIT_PREVIEW_LENGTH
 from wallet_bot.db.database import WalletDB
 from wallet_bot.services.audit import send_audit_message
-from wallet_bot.utils.amounts import fmt_amount, normalize_amount
+from wallet_bot.utils.amounts import fmt_compact_amount, normalize_amount
 from wallet_bot.utils.discord_helpers import defer_interaction, is_admin_member, run_blocking, send_interaction_message
 from wallet_bot.utils.validators import validate_collector, validate_note, validate_ticket_id
 from wallet_bot.views.set_confirm_view import SetConfirmView
-from wallet_bot.utils.amounts import fmt_compact_amount
 
 logger = logging.getLogger("wallet-bot")
 
@@ -63,6 +62,7 @@ AUTH_DESTINATION_CHOICES = [
     app_commands.Choice(name="Total Generated", value="total_generated"),
 ]
 
+
 def extract_ticket_number_from_channel(channel: Optional[discord.abc.GuildChannel]) -> Optional[str]:
     if not channel:
         return None
@@ -71,28 +71,38 @@ def extract_ticket_number_from_channel(channel: Optional[discord.abc.GuildChanne
     if not channel_name:
         return None
 
-    match = re.search(r"(?:ticket[-_\s]*)?(\d+)$", channel_name, re.IGNORECASE)
+    match = re.search(r"ticket[-_\s]*(\d+)", channel_name, re.IGNORECASE)
     if match:
         return match.group(1)
 
-    if "ticket" in channel_name.lower():
-        return channel_name
+    return None
+
+
+def get_ticket_id_from_current_channel(interaction: discord.Interaction) -> Optional[str]:
+    channel = interaction.channel
+    if not channel:
+        return None
+
+    channel_id = getattr(channel, "id", None)
+    ticket_number = extract_ticket_number_from_channel(channel)
+
+    if ticket_number and channel_id:
+        return str(channel_id)
 
     return None
 
 
 def build_ticket_choice_from_channel(interaction: discord.Interaction) -> Optional[app_commands.Choice[str]]:
     channel = interaction.channel
+    if not channel:
+        return None
+
     ticket_number = extract_ticket_number_from_channel(channel)
-
-    if not ticket_number:
-        return None
-
     channel_id = getattr(channel, "id", None)
-    if not channel_id:
-        return None
+    channel_name = getattr(channel, "name", None)
 
-    channel_name = getattr(channel, "name", f"ticket-{ticket_number}")
+    if not ticket_number or not channel_id or not channel_name:
+        return None
 
     return app_commands.Choice(
         name=f"{channel_name} | Ticket #{ticket_number}",
@@ -139,14 +149,17 @@ def build_wallet_embed(
 
     embed.add_field(name="Total Generated", value=fmt_compact_amount(wallet_view["total_generated"]), inline=True)
     embed.add_field(name="Deposit Wallet", value=fmt_compact_amount(wallet_view["deposit_wallet"]), inline=True)
-    embed.add_field(name="Hold Breakdown", value=f"GP: {fmt_compact_amount(gp_on_hold)}\nIRL: {fmt_compact_amount(irl_on_hold)}", inline=True)
+    embed.add_field(
+        name="Hold Breakdown",
+        value=f"GP: {fmt_compact_amount(gp_on_hold)}\nIRL: {fmt_compact_amount(irl_on_hold)}",
+        inline=True,
+    )
 
     if holds:
         lines = []
         for hold in holds[:8]:
             ticket_channel_id = hold.get("ticket_id")
             collector_text = short_preview(hold.get("collector_text")) or "N/A"
-
             ticket_display = f"<#{ticket_channel_id}>" if ticket_channel_id else "N/A"
 
             line = (
@@ -213,7 +226,7 @@ class WalletCommandGroup(app_commands.Group):
         user="Target user",
         field="Field to increase",
         amount="Amount to add",
-        ticket_id="Required when creating a hold",
+        ticket_id="Optional. Auto-detected from ticket channel when creating a hold.",
         collector="Optional collector text for hold entries",
         note="Optional note",
     )
@@ -237,12 +250,18 @@ class WalletCommandGroup(app_commands.Group):
 
         try:
             amount_dec = normalize_amount(amount)
+
+            if field.value in {"hold_gp", "hold_irl"} and not ticket_id:
+                ticket_id = get_ticket_id_from_current_channel(interaction)
+
             ticket_id = validate_ticket_id(ticket_id)
             collector = validate_collector(collector)
             note = validate_note(note)
 
             if field.value in {"hold_gp", "hold_irl"} and not ticket_id:
-                raise ValueError("ticket_id is required for hold entries.")
+                raise ValueError(
+                    "ticket_id is required for hold entries. Use this command inside a ticket channel or provide ticket_id manually."
+                )
 
             if field.value in {"loyalty_tokens", "completed_tickets"} and amount_dec != amount_dec.to_integral_value():
                 raise ValueError(f"{field.name} only accepts whole numbers.")
@@ -259,7 +278,6 @@ class WalletCommandGroup(app_commands.Group):
                 collector_text=collector,
             )
 
-            #message = f"✅ Added `{amount_dec}` to `{field.name}` for {user.mention}. Transaction ID: `{tx_id}`"
             message = f"✅ Added `{fmt_compact_amount(amount_dec)}` to `{field.name}` for {user.mention}. Transaction ID: `{tx_id}`"
             if hold_id:
                 message += f" | Hold ID: `{hold_id}`"
@@ -273,14 +291,6 @@ class WalletCommandGroup(app_commands.Group):
         except Exception as exc:
             logger.exception("Wallet add failed.")
             await send_interaction_message(interaction, f"❌ Add failed: {exc}", ephemeral=True)
-
-    @app_commands.command(name="set", description="Admin only. Set a wallet field to an exact value with confirmation.")
-    @app_commands.describe(
-        user="Target user",
-        field="Field to set",
-        value="New value",
-        note="Optional note",
-    )
 
     @add.autocomplete("ticket_id")
     async def add_ticket_id_autocomplete(
@@ -305,6 +315,13 @@ class WalletCommandGroup(app_commands.Group):
 
         return choices[:25]
 
+    @app_commands.command(name="set", description="Admin only. Set a wallet field to an exact value with confirmation.")
+    @app_commands.describe(
+        user="Target user",
+        field="Field to set",
+        value="New value",
+        note="Optional note",
+    )
     @app_commands.choices(field=WALLET_SET_CHOICES)
     async def set(
         self,
